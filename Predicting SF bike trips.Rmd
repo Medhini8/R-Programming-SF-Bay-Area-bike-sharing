@@ -1,0 +1,551 @@
+---
+title: "Predicting SF Bay Area bike sharing"
+author: "Group 10"
+date: "11/25/2020"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+
+### By:
+### Medhini Prakash - MXP200022
+### Pragya Shah     - PKS190002
+### Shruthi Nandish - SXN190054
+### Yeliujing Wang  - YXW180077
+
+
+\pagebreak
+
+
+
+
+```{r Packageload, echo=FALSE,warning=FALSE, message=FALSE}
+#Load Package
+pacman::p_load(data.table, forecast, leaps, 
+               tidyverse,ggcorrplot,corrplot,leaflet,sqldf,dplyr,sqldf,stringr,fasttime,tidyverse,visdat,ggpubr,gridExtra,lubridate,stringr,tidyr,plotly,MASS,caret,rpart,widgetframe, rpart.plot,olsrr,ggplot2,lubridate,forecast,reshape,plyr,
+ISLR, stats,lme4,randomForest, gbm, tree, moments, leaps)
+```
+
+
+```{r Loadfiles, echo=FALSE,warning=FALSE, message=FALSE}
+#Load Data set
+status <- fread("status.csv")
+station <- fread("station.csv")
+trip <- fread("trip.csv")
+weather <- fread("weather.csv")
+```
+
+# **Executive Summary**
+
+### Congested streets and slow-crawling traffic are a fact of life in many metropolitan areas.Bike sharing is an innovative solution for such problems, and it works by dispersing a large fleet of publicly-available bikes throughout crowded cities for personal transport. In this paper, We will be analyzing San Fransico Bay area bike share data set to perform exploratory data analysis to reveal some insights about the bike rental usage in San Fransisco which help to expalin demand for bike rentals which inturn allows for the better allocation of resources.
+
+# **1. Introduction**
+
+### A bicycle-sharing system is a service in which bicycles are made available for shared use to individuals on a short-term basis for a price. Many bike share systems allow people to borrow a bike from a "dock" and return it at another dock belonging to the same system.The docks of these bikes collect data about bike usage,and it is continuously monitored. In this analysis we would like to explore the the factors of bike rental usage as given below:
+
+## **Exploratory data analysis:**
+### 1.Are there more riders on the weekdays or weekends?
+### 2.Are there more customers or subscribers using the service?
+### 3.Which are the stations that tend to be the most ‘active’?
+
+## **2.Problem Statement**
+### 1. To analyze the impact of weather factors on bike rentals in order to efficiently manage bike demand and supply.
+
+### 2. Urban bikeshare systems are a wonderful way to get around a city. They are a great transit option for tourists and commuters alike. However, it can be frustrating to find a totally empty bikeshare station right at the start of a trip.
+
+### 3.Better management of the maintenance schedule of bikes.
+
+\pagebreak
+
+## **3.Description of data**
+
+### SF Bay Area Bike Share data set from Kaggle
+
+### The data has following four tables-
+
+### * **Station-** Data relating to the geographical location of 70 bike stations, their id, name, city, installation date and dock count. It has 70 observations and 7 variables.
+
+### * **Status-** Time series data relating to bikes and docks available for each station. This table has 71984434 observations and 4 variables.
+
+### * **Trip-** This table has data related to each trip over the three years. This table has 669959 observations and 11 variables.
+
+### * **Weather-** This table has data relating to daily weather conditions of each city over the three years. It has 3665 observations and 25 variables.
+
+## **4. Preprocessing Data**
+
+### In weather dataset,A total of 1281 records were missing,which approximates to 1.6%. Out of those records, 889 belonged to ‘max gust speed’ variable. wind gust speed- sudden increase in wind speed above the average wind speed. 
+
+```{r NAvalues, echo=FALSE,warning=FALSE, message=FALSE}
+#Checking missing values
+weather %>%
+  summarize(missing_info_in_weather=sum(is.na(weather)))
+
+sapply(weather[,-c("date","events","zip_code")],function(x)sum(is.na(x)))
+```
+
+
+```{r triphandle1, echo=FALSE,warning=FALSE, message=FALSE}
+weather$date <- mdy(weather$date)
+weather$wdate <- weather$date
+weather$date <- NULL
+
+#cleansing data
+weather$precipitation_inches[weather$precipitation_inches=='T']<-0.00
+weather$precipitation_inches<-as.numeric(weather$precipitation_inches)
+weather$events[weather$events=='rain']<-"Rain"
+weather$events[weather$events=='']<-"NormalDay"
+
+
+ #Get "city" variable into weather df
+        zip_code <- unique(weather$zip_code)
+        city <- c ("San Francisco", "Redwood City", "Palo Alto", "Mountain View", "San Jose")
+        index <- cbind(city, zip_code)   
+        index <- data.table(index)
+        index$zip_code <- as.numeric(index$zip_code)
+        weather <- merge(weather, index, by = "zip_code")
+rm(index,zip_code)
+
+```
+
+\pagebreak
+
+## Dropping missing values from weather dataset
+
+```{r Cleansing1, echo=FALSE,warning=FALSE, message=FALSE}
+#Checking if gust speed is dependent on mean wind speed
+#Plotting missing values
+weather.vis <- weather[,c("max_wind_Speed_mph","mean_wind_speed_mph","max_gust_speed_mph")]
+
+weather.vis%>%
+  arrange(mean_wind_speed_mph) %>%
+  vis_miss
+
+#Droppingg missing values
+weather <- na.omit(weather)
+rm(weather.vis)
+```
+
+### As max gust speed depends on the factor mean wind speed, we sorted the graph of gust speed based on arranging mean wind speed and observed a random pattern. There was no systematic relationship between missing data and other values. This is one type of missingness, which is missing completely at random(MCAR). To deal with the missing values, we could either omit missing values or assign the median value of variable to the missing observation, so we decided to drop missing values as these categories did not contribute to the overall fit of the model.
+
+
+```{r triphandle, echo=FALSE,warning=FALSE, message=FALSE}
+#Converting to date format
+trip$start_date <- mdy_hm(trip$start_date)
+trip$end_date <- mdy_hm(trip$end_date)
+trip$date <- trip$start_date
+trip$date <- as.Date(trip$date)
+
+#Converting zipcode to numeric
+trip$zip_code  <- as.numeric(trip$zip_code)
+trip<-na.omit(trip)
+
+# Day variable
+trip$week <- as.factor(wday(trip$date)) 
+which_day = function(x){
+  if(x %in% 2:6) return("Weekday")
+  if(x %in% c(1,7)) return("Weekend")
+}
+
+trip$day= sapply(trip$week,which_day)
+trip$week <- NULL
+
+# Creating season variable
+seasons = function(x){
+  if(x %in% 2:4) return("Spring")
+  if(x %in% 5:7) return("Summer")
+  if(x %in% 8:10) return("Fall")
+  if(x %in% c(11,12,1)) return("Winter")
+}
+
+trip$Season= sapply(month(trip$date),seasons)
+```
+
+\pagebreak
+
+## Identifying Duration of the trip
+
+```{r summary, echo=FALSE,warning=FALSE, message=FALSE}
+summary(trip$duration/60)
+```
+
+Median duration of trip is 8.50 minutes but maximum is 287840 mins which is highly unlikely. There are some outliers in the data set which we need to find out.
+
+## Identifying Outliers
+```{r Dur, echo=FALSE,warning=FALSE, message=FALSE}
+# Trips less than 1 hour
+trip <- mutate(trip, hour_trip = (duration <= 60*60))
+
+# Trips less than one day
+trip <- mutate(trip, day_trip = (duration <= 24*60*60))
+
+lengthdata <- nrow(trip)
+# Total no of trips less than 1 hour is:
+(sum(trip$hour_trip)/lengthdata)*100
+
+# Total no of trips less than 1 day is:
+(sum(trip$day_trip)/lengthdata)*100
+
+hour_trips <- subset(trip, hour_trip == TRUE)
+
+f <- ggplot(hour_trips, aes(duration/60, group = subscription_type, color = subscription_type)) +
+  geom_histogram(binwidth = 0.5) + 
+  xlab("Time in minutes") +
+  ylab("Total number of bicycle trips") +
+  geom_vline(xintercept = 20,color = "Red") + 
+  annotate("text", x = 20, y = 6000, label = "20 Mins", color = "Red",
+           size = 7)
+
+plot(f)
+
+day_trips <- subset(trip, day_trip == TRUE)
+
+g <- ggplot(day_trips, aes(duration/60/60, group = subscription_type, color = subscription_type)) +
+  geom_histogram(binwidth = 0.25) + 
+  xlab("Time in Hours") +
+  ylab("Total number of bicycle trips") + 
+  geom_vline(xintercept = 1,color = "Red") + 
+  annotate("text", x = 3, y = 60000, label = "1 Hour", color = "Red",
+           size = 7)
+plot(g)
+
+trip <- rbind(hour_trips,day_trips)
+trip$hour_trip <- NULL
+trip$day_trip <- NULL
+trip <- trip%>%
+        distinct()
+```
+
+### Analysis: 
+### A. 97% of trips are less than one Hour 
+### B. Majority of the trips are less than 20mins
+### C. 99% of the trips are less than one day, so we can remove other trips as outliers.
+### D.Customers have higher average trip duration which verifies that customers are tourists who uses bikes for a longer duration of time
+ 
+\pagebreak
+
+```{r tablejoin,echo=FALSE,warning=FALSE, message=FALSE}
+trip$id2 <- trip$id
+trip$id <- trip$start_station_id 
+#trip$id2 <- NULL
+# Station and trip join
+trip <- left_join(trip, station, by = c ("id"))
+
+trip_reg <-trip[, .(bikerides=.N), by=list(date,city,subscription_type)]
+
+trip_weather<-left_join(trip_reg,weather,by=c("city","date"="wdate"))
+trip_weather <- na.omit(trip_weather)
+
+trip_weather$week <- as.factor(wday(trip_weather$date)) 
+which_day = function(x){
+  if(x %in% 2:6) return("Weekday")
+  if(x %in% c(1,7)) return("Weekend")
+}
+
+trip_weather$day= sapply(trip_weather$week,which_day)
+trip_weather$week <- NULL
+
+# Creating season variable
+seasons = function(x){
+  if(x %in% 2:4) return("Spring")
+  if(x %in% 5:7) return("Summer")
+  if(x %in% 8:10) return("Fall")
+  if(x %in% c(11,12,1)) return("Winter")
+}
+
+trip_weather$Season= sapply(month(trip_weather$date),seasons)
+```
+
+## **5.Exploratory data analysis:**
+
+## Mean temperature vs bikerides across cities for all 3 years
+
+```{r Maxtemp,echo=FALSE,warning=FALSE, message=FALSE}
+
+trip_weather %>%
+  ggplot(aes(x=mean_temperature_f,y=bikerides))+
+  geom_point()+
+  expand_limits(y=0)+
+  ggtitle("Total trips per day vs weather across all cities")
+```
+
+### From the scatter plot, when we plot mean temperature vs ridecount, we see that as temperature rises, the number of ride increases. This is likely because people enjoy riding when temperature is not too cold. The mean temperature in Sf bay area varies from 40 F to 80 F. We see no. of trips across temperature has a huge range. The pattern appears to be random rather than linear.
+
+\pagebreak
+
+
+## Total number of trips by day of the week
+
+```{r Exploratory2,echo=FALSE,warning=FALSE, message=FALSE}
+#Analyzing if the weekend trips are more compare to weekday
+#create day variable and aggregate trip ID against it and customer type
+trip %>% 
+mutate(which_Day=factor(weekdays(start_date,abbreviate=TRUE),levels=c("Mon","Tue","Wed","Thu","Fri","Sat","Sun"))) %>% 
+group_by(which_Day,subscription_type) %>% dplyr::summarise(Trips=dplyr::n()) %>% 
+ggplot() + geom_bar(aes(x=which_Day,y=Trips),stat="Identity",fill="darkcyan")+ facet_grid(~subscription_type) + theme_classic() + ggtitle("Trips by Day of the Week by Customer Type")
+```
+
+```{r Exp_hour,echo=FALSE,warning=FALSE, message=FALSE}
+
+hour_trips$Start_Hour <- hour(hour_trips$start_date)
+data_custtype <- aggregate(duration ~ Start_Hour + day + subscription_type, data = hour_trips, FUN = mean)
+
+ggplot(data = data_custtype, aes(x = Start_Hour, y = duration/60, group = day, color = day)) +
+  geom_line() +
+  geom_point() +
+  facet_grid(~subscription_type) +
+  xlab("Time of day on 24 hour clock") + 
+  ylab("Mean duration, mins.") + 
+  ggtitle("Average Trip Duration")
+
+```
+
+## Observation from Plot1
+### * We can see that Customers have relatively stable trips made during weekdays and weekends. Whereas biketrips by subscribers are more on weekdays than weekends.
+
+## Observation from Plot2
+### 1.Average duration of trips by customers are higher than subscribers.
+### 2. Both customers as well as subscribers have average trip duration higher during weekends.
+### 3. Average trip time during day for subscribers is 8-9 mins and is almost same throughout the day.
+
+\pagebreak
+
+## What time during the weekday is the busiest??
+
+```{r Exp10,echo=FALSE,warning=FALSE, message=FALSE}
+
+#Peak hour
+
+t2 <- ymd_hms(trip$start_date) 
+t3 <- hour(t2) + minute(t2)/60
+trip$daytime <- t3 
+rm(t2, t3) #Cleanup 
+
+ggplot(trip, aes(daytime)) +
+  geom_histogram(binwidth = 0.25) + #Every fifteen minutes = binwidth 
+  geom_vline(xintercept = 9, color = 'orange')+
+  geom_vline(xintercept = 17, color = 'red', alpha = 0.7) +
+  annotate("text", x = 9, y = 27000, label = "9:00 AM", color = "orange",
+           size = 7) +
+  annotate("text", x = 17, y = 27000, label = "5:00 PM", color = "red", 
+           size = 7) +
+  xlab("Time of day on 24 hour clock") +
+  ylab("Total number of bicycle trips")
+```
+
+## Observation: 
+
+### We further did an analysis to see what is the peak time for travelling via bikesharing. We observe two peaks between 8:00am-9:00am and 5:00pm-6:00pm. Based on the above observations, we can interpret that there are more rides on weekdays likely because bikes are used more as a means to travel to and from office, than for tourism.
+
+## **Business Insights:**
+### * Bike Share Program Manager needs to ensure that there are sufficient number of bikes present at these timings to cater the needs.
+### * There are off times from 1:00 AM to 5:00 AM when there are no trips and could be used efficiently to transport bike to ensure proper supply of bikes and without affecting normal traffic.
+
+## What time the rides are more acorss seasons?
+
+```{r seasontime,echo=FALSE,warning=FALSE, message=FALSE}
+
+ggplot(trip, aes(daytime)) +
+    geom_histogram(binwidth = 0.25) + #Every fifteen minutes = binwidth 
+    geom_vline(xintercept = 9, color = 'orange')+
+    geom_vline(xintercept = 17, color = 'red', alpha = 0.7) +
+    xlab("Time of day on 24 hour clock") +
+    ylab("Total number of bicycle trips") +
+    facet_wrap(~Season)
+
+trip$daytime <- NULL
+
+```
+
+### From these plots it looks like that pattern from before holds. That is, the total number of trips peak around rush hour. Also notice the consistent small peak around lunch hour each day at noon. We can also observe that the number of trips in winter slightly decreases.
+
+## **Business Insights**: 
+### Since the number rides fall during winter, bike maintainance can be scheduled.
+
+\pagebreak
+
+### 8. Exploratory data analysis to know the active stations and bike rental usage between subscribers and customers
+
+## who rides the most?
+
+```{r Usage,echo=FALSE,warning=FALSE, message=FALSE}
+
+daily <- trip%>%
+          group_by(city,subscription_type)%>%
+          dplyr::summarise(ride=dplyr::n())
+
+#Plot usage by city
+ggplot(daily, aes(city,ride)) + 
+  geom_bar(stat="identity",fill="cyan4") +
+  facet_wrap(~subscription_type) +
+  xlab("Cities") + 
+  ylab("Number of Ride") +
+  ggtitle("Comparison of Usage Between Customers and Subscribers")+
+  scale_y_continuous() +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+### 	We have bike sharing business in five cities in San Francisco bay area, namely San Francisco, San Jose, Redwood city, Palo Alto and mountain view. Analysis of trips across cities reveal that San Francisco has the highest number of trips per day, followed by San Jose. We again ascertain the weekday- weekend pattern here, where number of trips in weekdays dominate weekends in San Francisco.The number of rides occurred mainly during weekdays and fell to a lower number during weekends. Hence, we would expect the availability of bikes problem to occur more during weekdays.
+
+
+## which city has high number of stations?
+
+```{r Exploratory5, echo=FALSE}
+
+#which stations have more bicycle trips
+ggplot(data=station,aes(x =city))+
+  geom_bar(stat="count",fill="steelblue",width=0.5)+
+  xlab("City")+
+  ylab("Stations")+
+  coord_flip()
+```
+
+### We further wanted to clarify why San Francisco has more bike trips than other cities. One of the reasons can be because San Francisco has highest number of stations, 35 station out of 74 station and also San Fransisco has more number of docks. Also, San Francisco is a popular tourist place.
+
+## EDA to know the active stations
+
+```{r Cities,echo=FALSE,message=FALSE,warning=FALSE}
+sf <- c("South Van Ness at Market", "Market at 10th", "San Francisco City Hall","Golden Gate at Polk","Civic Center BART (7th at Market)", "Powell Street BART","Powell at Post (Union Square)", "5th at Howard", "Market at 4th", "Post at Kearny", 
+"Commercial at Montgomery", "Washington at Kearny", "Grant Avenue at Columbus Avenue","Embarcadero at Sansome", "Embarcadero at Vallejo", "Broadway St at Battery St","Davis at Jackson", "Clay at Battery", "Harry Bridges Plaza (Ferry Building)","Steuart at Market", "Beale at Market", "Mechanics Plaza (Market at Battery)","Embarcadero at Folsom", "Temporary Transbay Terminal (Howard at Beale)","Market at Sansome", "Spear at Folsom", "Howard at 2nd", "Embarcadero at Bryant", 
+"Yerba Buena Center of the Arts (3rd @ Howard)", "2nd at Folsom", "2nd at South Park","2nd at Townsend", "San Francisco Caltrain (Townsend at 4th)", "Townsend at 7th","San Francisco Caltrain 2 (330 Townsend)")
+
+### Create 2 columns that tag the start and end stations on whether they are SF stations ###
+trip1<-trip
+trip1$go <- ifelse(trip1$start_station_name %in% sf, "SF", "Non-SF")
+trip1$back <- ifelse(trip1$end_station_name %in% sf, "SF", "Non-SF")
+trip1$bikeride_in_cities <- paste(trip1$go, trip1$back, sep = " to ")
+```
+
+
+```{r SFCities,echo=FALSE,message=FALSE,warning=FALSE}
+tripdata <- filter(trip1, bikeride_in_cities == 'SF to SF')
+rm(trip1)
+```
+
+### We expect several stations that are nearer to the business centre to be more crowded/congested during peakhours!
+
+### We shall now investigate by looking at the top stations for customers and subscribers.
+
+```{r topstations,echo=FALSE,message=FALSE,warning=FALSE}
+startpaths <- ddply(tripdata, .(start_station_name), tally) %>% arrange(desc(n))
+
+endpaths <- ddply(tripdata, .(end_station_name), tally) %>% arrange(desc(n))
+length_hourtrip <- dim(trip)[1]
+
+data_user_station <- data.frame(table(trip$subscription_type,                                trip$start_station_name)/length_hourtrip)
+
+data_user_station$Percent <- data_user_station$Freq*100
+
+```
+
+```{r topcustomers,echo=FALSE,message=FALSE,warning=FALSE }
+customer <- names(head(sort(table(trip$start_station_name[trip$subscription_type == 'Customer']), decreasing = TRUE),5))
+
+subscriber <- names(head(sort(table(trip$start_station_name[trip$subscription_type == 'Subscriber']), decreasing = TRUE), 5))
+
+```
+
+## Top stations for customers and subscribers in the graph
+```{r graph,echo=FALSE,message=FALSE,warning=FALSE}
+bsd <- trip %>% 
+  #filter for SF network
+  filter({start_station_name %in% sf} & {end_station_name %in% sf}) %>%
+  mutate(subscription_type=factor(subscription_type ,levels=c("Customer","Subscriber")))
+
+cust_transmat <- bsd %>%
+filter(subscription_type=="Customer") %>% dplyr::select(start_station_name,end_station_name) %>% 
+table()
+cust_transmat <- cust_transmat/rowSums(cust_transmat)
+cust_stationary_probs <- eigen(t(cust_transmat))$vectors[,1]
+cust_stationary_probs <- Re(cust_stationary_probs/sum(cust_stationary_probs))
+
+sub_transmat<-bsd %>% 
+  filter(subscription_type=="Subscriber") %>% dplyr::select(start_station_name,end_station_name) %>% 
+table() 
+sub_transmat <- sub_transmat/rowSums(sub_transmat)
+sub_stationary_probs <- eigen(t(sub_transmat))$vectors[,1]
+sub_stationary_probs <- Re(sub_stationary_probs/sum(sub_stationary_probs))
+
+data.frame(Station=c(rownames(cust_transmat),rownames(sub_transmat)),Proportion=c(cust_stationary_probs,sub_stationary_probs),Customer=rep(c("Customer","Subscriber"),each=35)) %>% ggplot() + geom_bar(aes(x=Station,y=Proportion),stat="identity")+facet_grid(Customer~.) + theme_classic()+theme(axis.text.x=element_text(angle=45,hjust=1)) + ggtitle("Long Run Proportion of Trips Involving Station")
+
+```
+
+### Customer trips involve “Embarcadero at Sansome” and “Harry Bridges Plaza (Ferry Building)” far more than Subscriber trips. Additionally, Subscriber trips involve “San Francisco Caltrain (Townsend at 4th)” and “San Francisco Caltrain 2 (330 Townsend)” far more than Customer trips.If everyone is travelling to, for example, San Francisco Caltrain (Townsend at 4th), then we will be expecting that station to be full quickly!
+
+### Customer trips are centered more around tourist or visitor centers. For example, “Embarcadero at Sansome” is in close proximity to AT&T park, Little Italy and the North Beach Area. These represent hotspots for one-off transactions of the bike share program. Meanwhile the Caltrain-related stations represent gateways for people trying to enter the San Francisco network for work.
+
+## **Business Insights**:
+
+### * Subscribers are monthly pass holders whereas customers are daily ticket takers. Also we know that number of customers are significantly less as compared to the number of subscribers. To attract more customers they should offer them some kind of attractive deals and discounts.
+
+
+## Mean occupancy at peak time
+```{r occupancy,echo=FALSE,message=FALSE,warning=FALSE}
+s <- c("San Francisco Caltrain (Townsend at 4th)","San Francisco Caltrain 2 (330 Townsend)	",
+"Harry Bridges Plaza (Ferry Building)","Temporary Transbay Terminal (Howard at Beale)","Embarcadero at Sansome",
+"2nd at Townsend","Harry Bridges Plaza (Ferry Building)","2nd at Townsend","Market at Sansome",
+"Davis at Jackson","Clay at Battery","Golden Gate at Polk","Post at Kearny","San Francisco City Hall",		"Washington at Kearny")
+
+ 
+library(plyr)
+dock_util <- status %>%
+            filter(station_id %in% c(50,55,60,61,70,77,41,42,58,59))
+dock_util$time <- fastPOSIXct(dock_util$time)
+dock_util$ridedate <- as.Date(dock_util$time)
+dock_util$hr <- hour(dock_util$time)
+
+dock_util <- dock_util %>%
+            filter(hr==9 | hr==5) %>%
+            mutate(occupancy=bikes_available/(docks_available+bikes_available))
+
+dock_util <- setDT(dock_util)
+dock_util <- ddply(dock_util,c('ridedate','station_id'), summarize,mean_occupancy=mean(occupancy))
+
+dock_util_41 <- dock_util%>%
+                filter(station_id==41)
+
+dock_util_70 <- dock_util%>%
+                filter(station_id==70)
+```
+
+### Mean occupancy of station 41(non poular station)
+
+```{r occupancy1,echo=FALSE,message=FALSE,warning=FALSE}
+ggplot(dock_util_41, aes(mean_occupancy)) +
+    geom_histogram(binwidth = 0.25)
+```
+
+### Mean occupancy of station 70(popular station)
+
+```{r occupancy2,echo=FALSE,message=FALSE,warning=FALSE}
+
+ggplot(dock_util_70, aes(mean_occupancy)) +
+    geom_histogram(binwidth = 0.25)
+
+```
+
+### The manager can look at the occupancy rate at peak hours and can analyze if bikes need to be transferred from high occupancy(meaning more bikes are available as proportion to docks) to low occupancy so that a case doesnot happens that a customer comes and bikes are not available. This will also lead to better allocation of resources. 
+
+## Business Suggestions as per the analysis:
+
+### 1.Weather factors do influence the bike rentals in SF bay area. These 6 top predictors to be Mean_temperature,Cloud cover,prepcipitation_inches,Max temperature,Mean humidity,Mean_seal_level_pressure. If bike managers can predict weather variables using meteorological department then they can predict the demand and manage the supply accordingly.
+
+### 2.If end goal is to increase number of trips and improve turnaround time and efficiency of bikes then Manager should target more subscribers who uses bikes daily. In this way we can increase the turnaround time per bike and result in better productivity and better flow of our inventory.
+
+### 3.If end goal is to increase duration of trips and increase more profits per bike than manager needs to target customers who uses the bikes on weekends for visiting the city.
+
+### 4.In San Francisco, subscribers are the predominant group of riders and customers are relatively small. So efforts should be made to retain subscribers and entice customers. Most operators offer annual memberships between $45 and $150 per year for Subscribers.Retaining subscribers as can give steady source of revenue.Revenue from customers is more variable but high, daily  passes for $6 to $10 per day (Shaheen, 2014). Efforts should be made by bike share manager to tap this source of revenue
+
+### 5.Bike share managers can create special category which gives 7 day pass and 1 month subscription
+
+### 6.There are certain time during night where there are no activities, these time should be used efficiently to move the bikes as per the demand.
+
+### 7.Program Manager could tie up and partner with corporate offices in San Francisco to increase their number of subscribers and increase their revenue base or Partering up with local tourist operator for sight seeing and provide more offers on weekends trips
+
+## 11. References:
+### https://www.kaggle.com/benhamner/sf-bay-area-bike-share
+### https://rstudio-pubs-static.s3.amazonaws.com/
+### https://www.bench2business.com/analysing-how-much-i-saved-by-cycling-using-r/
