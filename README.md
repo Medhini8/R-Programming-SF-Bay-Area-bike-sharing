@@ -4,14 +4,13 @@ This Repository contains Exploratory Data Analysis of SF Bay area Bike Sharing u
 ### Executive Summary
 Congested streets and slow-crawling traffic are a fact of life in many metropolitan areas.Bike sharing is an innovative solution for such problems, and it works by dispersing a large fleet of publicly-available bikes throughout crowded cities for personal transport. In this paper, We will be analyzing San Fransico Bay area bike share data set to perform exploratory data analysis to reveal some insights about the bike rental usage in San Fransisco and then create an appropriate prediction model which help to expalin demand for bike rentals which inturn allows for the better allocation of resources.
 
-### In this analysis
-we would like to explore the the factors of bike rental usage as given below:
+### In this analysis we would like to explore the the factors of bike rental usage as given below:
 Exploratory data analysis:
 1.Are there more riders on the weekdays or weekends?
 2.Are there more customers or subscribers using the service?
 3.Which are the stations that tend to be the most ‘active’?
 
-### 2.Problem Statement
+### Problem Statement
 1. To analyze the impact of weather factors on bike rentals in order to efficiently manage bike
 demand and supply.
 2. Urban bikeshare systems are a wonderful way to get around a city. They are a great transit
@@ -31,7 +30,7 @@ C. 99% of the trips are less than one day, so we can remove other trips as outli
 D.Customers have higher average trip duration which verifies that customers are tourists who
 uses bikes for a longer duration of time
 
-### 3.Exploratory Data Analysis
+### Exploratory Data Analysis
 ![image](https://user-images.githubusercontent.com/96325556/146664151-bd1cf984-f217-44eb-973c-51a5bf817ec6.png)
 ![image](https://user-images.githubusercontent.com/96325556/146664175-523b160d-8cc8-4d5a-a15f-ccf8b1fb76e8.png)
 ![image](https://user-images.githubusercontent.com/96325556/146664199-a20a824a-2b13-4eed-b6f6-376df842658a.png)
