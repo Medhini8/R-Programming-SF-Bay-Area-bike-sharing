@@ -2,7 +2,7 @@
 This Repository contains Exploratory Data Analysis of SF Bay area Bike Sharing using R
 
 ### Executive Summary
-Congested streets and slow-crawling traffic are a fact of life in many metropolitan areas.Bike sharing is an innovative solution for such problems, and it works by dispersing a large fleet of publicly-available bikes throughout crowded cities for personal transport. In this paper, We will be analyzing San Fransico Bay area bike share data set to perform exploratory data analysis to reveal some insights about the bike rental usage in San Fransisco and then create an appropriate prediction model which help to expalin demand for bike rentals which inturn allows for the better allocation of resources.
+Congested streets and slow-crawling traffic are a fact of life in many metropolitan areas.Bike sharing is an innovative solution for such problems, and it works by dispersing a large fleet of publicly-available bikes throughout crowded cities for personal transport. In this paper, We have analyzed San Fransico Bay area bike share data set to perform exploratory data analysis to reveal some insights about the bike rental usage in San Fransisco which help to expalin demand for bike rentals which inturn allows for the better allocation of resources.
 
 ### In this analysis we would like to explore the the factors of bike rental usage as given below:
 Exploratory data analysis:
